@@ -22,6 +22,8 @@ const Index = () => {
   const [seed, setSeed] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [predictionId, setPredictionId] = useState<string | null>(null);
+  const [pollingInterval, setPollingInterval] = useState<number | null>(null);
 
   // Load API key from localStorage on component mount
   useEffect(() => {
@@ -37,6 +39,15 @@ const Index = () => {
       localStorage.setItem("replicate_api_key", apiKey);
     }
   }, [apiKey]);
+
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
 
   const handleGenerateImage = async () => {
     if (!apiKey) {
@@ -59,33 +70,119 @@ const Index = () => {
 
     setIsGenerating(true);
     setGeneratedImages([]);
+    setPredictionId(null);
+
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      setPollingInterval(null);
+    }
 
     try {
-      // This is a placeholder for the actual API call
-      // In a real implementation, you would make a fetch request to Replicate's API
-      // or to your own backend that handles the API call
-      
-      toast({
-        title: "API Integration Required",
-        description: "This is a UI demo. Add your backend integration to make actual API calls to Replicate.",
+      // Make the initial API call to start the prediction
+      const response = await fetch("https://api.replicate.com/v1/predictions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Token ${apiKey}`,
+        },
+        body: JSON.stringify({
+          version: "a4a8bafd6089e1716b06057c42b19378250d008b80fe87caa5cd36d40c1eda90", // SDXL model
+          input: {
+            prompt,
+            negative_prompt: negativePrompt,
+            width,
+            height,
+            num_outputs: numOutputs,
+            scheduler,
+            num_inference_steps: numInferenceSteps,
+            guidance_scale: guidanceScale,
+            seed: seed ? parseInt(seed) : undefined,
+          },
+        }),
       });
-      
-      // Simulate a delay for demonstration purposes
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Placeholder for generated images
-      setGeneratedImages([
-        "https://replicate.delivery/pbxt/4kw2JSufHBENDD7Fbg11PmNYOLNnkbMSWYIhM7zUk6WZYFjIA/out-0.png"
-      ]);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Failed to start image generation");
+      }
+
+      const predictionData = await response.json();
+      setPredictionId(predictionData.id);
+
+      // Start polling for the prediction result
+      const interval = window.setInterval(async () => {
+        await checkPredictionStatus(predictionData.id);
+      }, 2000);
+
+      setPollingInterval(interval);
     } catch (error) {
+      console.error("Error generating image:", error);
       toast({
         title: "Error",
-        description: "Failed to generate image. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to generate image. Please try again.",
         variant: "destructive",
       });
-      console.error("Error generating image:", error);
-    } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const checkPredictionStatus = async (id: string) => {
+    try {
+      const response = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to check prediction status");
+      }
+
+      const prediction = await response.json();
+
+      if (prediction.status === "succeeded") {
+        // Clear the polling interval
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
+          setPollingInterval(null);
+        }
+
+        // Set the generated images
+        setGeneratedImages(prediction.output);
+        setIsGenerating(false);
+        toast({
+          title: "Success",
+          description: "Your image has been generated successfully!",
+        });
+      } else if (prediction.status === "failed") {
+        // Clear the polling interval
+        if (pollingInterval) {
+          clearInterval(pollingInterval);
+          setPollingInterval(null);
+        }
+
+        setIsGenerating(false);
+        toast({
+          title: "Generation Failed",
+          description: prediction.error || "Image generation failed. Please try again.",
+          variant: "destructive",
+        });
+      }
+      // For 'starting' or 'processing' status, we continue polling
+    } catch (error) {
+      console.error("Error checking prediction status:", error);
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+      setIsGenerating(false);
+      toast({
+        title: "Error",
+        description: "Failed to check generation status. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
