@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "@/hooks/use-toast";
+// Importing a component that doesn't exist to cause a build error
+import { NonExistentComponent } from "@/components/ui/non-existent-component";
 
 const Index = () => {
   const [apiKey, setApiKey] = useState("");
@@ -193,6 +195,9 @@ const Index = () => {
 
   return (
     <div className="container mx-auto py-8 px-4">
+      {/* Using the non-existent component to cause a build error */}
+      <NonExistentComponent />
+      
       <Card className="mb-8">
         <CardHeader>
           <CardTitle>Replicate API Key</CardTitle>
